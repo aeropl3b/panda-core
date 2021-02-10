@@ -1,4 +1,3 @@
-#include <iterator>
 
 namespace panda {
 
@@ -26,7 +25,7 @@ public:
   bool is_deleted() const { return _status == kDELETED; }
   bool is_used() const { return _status == kUSED; }
 
-  Key key() { return _data.first; }
+  Key key() const { return _data.first; }
   std::pair<const Key, T> &value() { return _data; }
   const std::pair<const Key, T> &value() const { return _data; }
   T &mapped() { return _data.second; }
@@ -87,7 +86,7 @@ unordered_map<Key, T, Hash, KeyEqual>::unordered_map(size_type count,
                                                      const Hash &hash,
                                                      const KeyEqual &equal)
     : _impl(__alloc_impl()),
-      _data(static_cast<size_type>(std::max(__one, count) /
+      _data(static_cast<size_type>(std::max(__ONE, count) /
                                    _impl->_max_load_factor)),
       _hash(hash), _key_equal(equal) {}
 
@@ -119,7 +118,7 @@ unordered_map<Key, T, Hash, KeyEqual>::unordered_map(InputIt first,
                                                      size_type count,
                                                      const Hash &hash,
                                                      const KeyEqual &equal)
-    : _impl(__alloc_impl()), _data(std::max(__one, count)), _hash(hash),
+    : _impl(__alloc_impl()), _data(std::max(__ONE, count)), _hash(hash),
       _key_equal(equal) {
   auto it = first;
   for (; it != last; it++) {
@@ -131,7 +130,7 @@ template <class Key, class T, class Hash, class KeyEqual>
 unordered_map<Key, T, Hash, KeyEqual>::unordered_map(
     std::initializer_list<value_type>
         init /*, const Allocator& alloc = Allocator()*/)
-    : unordered_map(init, __one, Hash(), KeyEqual()) {}
+    : unordered_map(init, __ONE, Hash(), KeyEqual()) {}
 template <class Key, class T, class Hash, class KeyEqual>
 unordered_map<Key, T, Hash, KeyEqual>::unordered_map(
     std::initializer_list<value_type> init,
@@ -147,7 +146,7 @@ unordered_map<Key, T, Hash, KeyEqual>::unordered_map(
     std::initializer_list<value_type> init, size_type count, const Hash &hash,
     const KeyEqual &equal /*, const Allocator& alloc = Allocator()*/)
     : _impl(__alloc_impl()),
-      _data(static_cast<size_type>(std::max({__one, count, init.size()}) /
+      _data(static_cast<size_type>(std::max({__ONE, count, init.size()}) /
                                    _impl->_max_load_factor)),
       _hash(hash), _key_equal(equal) {
   for (auto &el : init) {
@@ -156,16 +155,31 @@ unordered_map<Key, T, Hash, KeyEqual>::unordered_map(
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
-template <class Iterator, class ContainerIterator>
+template <class Iterator>
 class unordered_map<Key, T, Hash, KeyEqual>::iterator_common_impl {
 protected:
-  ContainerIterator _it, _begin, _end;
+  using difference_type =
+      typename unordered_map<Key, T, Hash, KeyEqual>::difference_type;
+  using value_type = typename unordered_map<Key, T, Hash, KeyEqual>::value_type;
+  using pointer =
+      typename unordered_map<Key, T, Hash, KeyEqual>::container::pointer;
+  using const_pointer =
+      typename unordered_map<Key, T, Hash, KeyEqual>::container::const_pointer;
+  using iterator_category = std::bidirectional_iterator_tag;
 
-  iterator_common_impl(ContainerIterator it, ContainerIterator begin,
-                       ContainerIterator end)
-      : _it(it), _begin(begin), _end(end) {}
+  pointer _it, _begin, _end;
+
+  iterator_common_impl(pointer current, pointer begin, pointer end)
+      : _it(current), _begin(begin), _end(end) {}
+
+  iterator_common_impl(const_pointer current, const_pointer begin,
+                       const_pointer end)
+      : _it(const_cast<pointer>(current)), _begin(const_cast<pointer>(begin)),
+        _end(const_cast<pointer>(end)) {}
 
 public:
+  iterator_common_impl()
+    : _it(nullptr), _begin(nullptr), _end(nullptr) {}
   iterator_common_impl(const Iterator &other)
       : _it(other._it), _begin(other._begin), _end(other._end) {}
 
@@ -175,30 +189,30 @@ public:
       _begin = other._begin;
       _end = other._end;
     }
-    return *this;
+    return *static_cast<Iterator *>(this);
   }
 
   Iterator operator++() {
     ++_it;
     while (_it != _end && !_it->is_used())
       ++_it;
-    return *this;
+    return *static_cast<Iterator *>(this);
   }
   Iterator operator++(int) {
     auto save = *this;
     this->operator++();
-    return save;
+    return *static_cast<Iterator *>(&save);
   }
   Iterator operator--() {
     --_it;
     while (_it != _begin && !_it->is_used())
       --_it;
-    return *this;
+    return *static_cast<Iterator *>(this);
   }
   Iterator operator--(int) {
     auto save = *this;
     this->operator++();
-    return save;
+    return *static_cast<Iterator *>(&save);
   }
 
   friend bool operator==(const iterator_common_impl &a,
@@ -214,96 +228,128 @@ public:
 template <class Key, class T, class Hash, class KeyEqual>
 class unordered_map<Key, T, Hash, KeyEqual>::const_iterator_impl
     : public unordered_map<Key, T, Hash, KeyEqual>::iterator_common_impl<
-          unordered_map<Key, T, Hash, KeyEqual>::const_iterator_impl,
-          typename unordered_map<Key, T, Hash, KeyEqual>::container::const_iterator> {
-  using node_vec_iterator = typename unordered_map::container::const_iterator;
+          unordered_map<Key, T, Hash, KeyEqual>::const_iterator_impl> {
   using iterator_common =
       typename unordered_map<Key, T, Hash, KeyEqual>::iterator_common_impl<
-          unordered_map<Key, T, Hash, KeyEqual>::const_iterator_impl,typename unordered_map<Key, T, Hash, KeyEqual>::container::const_iterator>;
-
-  const_iterator_impl(node_vec_iterator it, node_vec_iterator begin,
-                      node_vec_iterator end)
-      : iterator_common(it, begin, end) {}
-  friend unordered_map;
+          unordered_map<Key, T, Hash, KeyEqual>::const_iterator_impl>;
 
 public:
-  using difference_type =
-      typename unordered_map<Key, T, Hash, KeyEqual>::difference_type;
-  using value_type = typename unordered_map<Key, T, Hash, KeyEqual>::value_type;
+  const_iterator_impl() = default;
+
+  using difference_type = typename iterator_common::difference_type;
+  using value_type = typename iterator_common::value_type;
+  using iterator_category = typename iterator_common::iterator_category;
   using pointer = typename unordered_map<Key, T, Hash, KeyEqual>::const_pointer;
   using reference =
       typename unordered_map<Key, T, Hash, KeyEqual>::const_reference;
-  using iterator_category = std::bidirectional_iterator_tag;
 
   reference operator*() { return this->_it->value(); }
   pointer operator->() { return &(this->_it->value()); }
+
+private:
+  const_iterator_impl(typename iterator_common::const_pointer it,
+                      typename iterator_common::const_pointer begin,
+                      typename iterator_common::const_pointer end)
+      : iterator_common(it, begin, end) {}
+  friend unordered_map;
 };
 
 template <class Key, class T, class Hash, class KeyEqual>
 class unordered_map<Key, T, Hash, KeyEqual>::iterator_impl
     : public unordered_map<Key, T, Hash, KeyEqual>::iterator_common_impl<
-          unordered_map<Key, T, Hash, KeyEqual>::iterator_impl,
-          typename unordered_map<Key, T, Hash, KeyEqual>::container::iterator> {
-  using node_vec_iterator = typename unordered_map::container::iterator;
+          unordered_map<Key, T, Hash, KeyEqual>::iterator_impl> {
   using iterator_common =
       typename unordered_map<Key, T, Hash, KeyEqual>::iterator_common_impl<
-          unordered_map<Key, T, Hash, KeyEqual>::iterator_impl,typename unordered_map<Key, T, Hash, KeyEqual>::container::const_iterator>;
-  iterator_impl(node_vec_iterator it, node_vec_iterator begin,
-                node_vec_iterator end)
-      : iterator_common(it, begin, end) {}
-  friend unordered_map;
+          unordered_map<Key, T, Hash, KeyEqual>::iterator_impl>;
 
 public:
-  using difference_type =
-      typename unordered_map<Key, T, Hash, KeyEqual>::difference_type;
-  using value_type = typename unordered_map<Key, T, Hash, KeyEqual>::value_type;
+  using difference_type = typename iterator_common::difference_type;
+  using value_type = typename iterator_common::value_type;
+  using iterator_category = typename iterator_common::iterator_category;
   using pointer = typename unordered_map<Key, T, Hash, KeyEqual>::pointer;
   using reference = typename unordered_map<Key, T, Hash, KeyEqual>::reference;
-  using iterator_category = std::bidirectional_iterator_tag;
+
+  iterator_impl() = default;
 
   reference operator*() { return this->_it->value(); }
   pointer operator->() { return &(this->_it->value()); }
 
   operator const_iterator_impl() const {
-    return const_iterator_impl(this->_it, this->_begin,
-                               this->_end);
+    return const_iterator_impl(this->_it, this->_begin, this->_end);
   }
+
+private:
+  iterator_impl(typename iterator_common::pointer it,
+                typename iterator_common::pointer begin,
+                typename iterator_common::pointer end)
+      : iterator_common(it, begin, end) {}
+  friend unordered_map;
 };
+
+template <class Key, class T, class Hash, class KeyEqual>
+typename unordered_map<Key, T, Hash, KeyEqual>::size_type
+unordered_map<Key, T, Hash, KeyEqual>::__first_used_index() const {
+  size_type index;
+  if (this->empty()) {
+    index = __INVALID_INDEX;
+  } else {
+    index = 0;
+    while (index < _data.size() && !_data[index].is_used()) {
+      index++;
+    }
+  }
+  return index;
+}
+
+template <class Key, class T, class Hash, class KeyEqual>
+typename unordered_map<Key, T, Hash, KeyEqual>::size_type
+unordered_map<Key, T, Hash, KeyEqual>::__last_used_index() const {
+  size_type index;
+  if (this->empty()) {
+    index = __INVALID_INDEX;
+  } else {
+    index = _data.size() - 1;
+    while (!_data[index].is_used() && index > 0) {
+      index--;
+    }
+  }
+  return index;
+}
 
 template <class Key, class T, class Hash, class KeyEqual>
 typename unordered_map<Key, T, Hash, KeyEqual>::iterator
 unordered_map<Key, T, Hash, KeyEqual>::begin() {
-  return iterator(_data.begin(), _data.begin(), _data.end());
+  return __iterator_from_index<iterator>(__first_used_index());
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
 typename unordered_map<Key, T, Hash, KeyEqual>::iterator
 unordered_map<Key, T, Hash, KeyEqual>::end() {
-  return iterator(_data.end(), _data.begin(), _data.end());
+  return __iterator_from_index<iterator>(__last_used_index() + 1);
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
 typename unordered_map<Key, T, Hash, KeyEqual>::const_iterator
 unordered_map<Key, T, Hash, KeyEqual>::begin() const {
-  return const_iterator(_data.begin(), _data.begin(), _data.end());
+  return __iterator_from_index<const_iterator>(__first_used_index());
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
 typename unordered_map<Key, T, Hash, KeyEqual>::const_iterator
 unordered_map<Key, T, Hash, KeyEqual>::end() const {
-  return const_iterator(_data.end(), _data.begin(), _data.end());
+  return __iterator_from_index<const_iterator>(__last_used_index() + 1);
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
 typename unordered_map<Key, T, Hash, KeyEqual>::const_iterator
 unordered_map<Key, T, Hash, KeyEqual>::cbegin() const {
-  return const_iterator(_data.begin(), _data.begin(), _data.end());
+  return __iterator_from_index<const_iterator>(__first_used_index());
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
 typename unordered_map<Key, T, Hash, KeyEqual>::const_iterator
 unordered_map<Key, T, Hash, KeyEqual>::cend() const {
-  return const_iterator(_data.end(), _data.begin(), _data.end());
+  return __iterator_from_index<const_iterator>(__last_used_index() + 1);
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
@@ -348,7 +394,7 @@ unordered_map<Key, T, Hash, KeyEqual>::key_to_index(const K &key,
   auto cap = _data.size();
   size_type count = 0;
   auto index = _hash(key) % _data.size();
-  auto index_del = __invalid_index;
+  auto index_del = __INVALID_INDEX;
   bool exists = false;
 
   while (!_data[index].is_open() // stop at the first open slot
@@ -358,7 +404,7 @@ unordered_map<Key, T, Hash, KeyEqual>::key_to_index(const K &key,
     if (is_equal(_data[index].key(), key)) {
       exists = true;
     } else {
-      if (_data[index].is_deleted() && index_del == __invalid_index) {
+      if (_data[index].is_deleted() && index_del == __INVALID_INDEX) {
         index_del = index;
       }
       index = ++index % cap;
@@ -367,7 +413,7 @@ unordered_map<Key, T, Hash, KeyEqual>::key_to_index(const K &key,
   }
 
   if (count == cap) {
-    index = __invalid_index;
+    index = __INVALID_INDEX;
   }
 
   return std::make_tuple(index, exists);
@@ -381,7 +427,7 @@ unordered_map<Key, T, Hash, KeyEqual>::key_to_index(const K &key,
   auto cap = _data.size();
   size_type count = 0;
   auto index = _hash(key) % _data.size();
-  auto index_del = __invalid_index;
+  auto index_del = __INVALID_INDEX;
   bool exists = false;
 
   while (!_data[index].is_open() // stop at the first open slot
@@ -391,7 +437,7 @@ unordered_map<Key, T, Hash, KeyEqual>::key_to_index(const K &key,
     if (is_equal(_data[index].key(), key)) {
       exists = true;
     } else {
-      if (_data[index].is_deleted() && index_del == __invalid_index) {
+      if (_data[index].is_deleted() && index_del == __INVALID_INDEX) {
         index_del = index;
       }
       index = ++index % cap;
@@ -399,7 +445,7 @@ unordered_map<Key, T, Hash, KeyEqual>::key_to_index(const K &key,
     }
   }
 
-  if (index_del != __invalid_index) {
+  if (index_del != __INVALID_INDEX) {
     if (exists) {
       // If it exists, and there was a deleted slot open before, move the data
       // closer to the hash index. This is not done in the const version
@@ -407,7 +453,7 @@ unordered_map<Key, T, Hash, KeyEqual>::key_to_index(const K &key,
     }
     index = index_del;
   } else if (count == cap) {
-    index = __invalid_index;
+    index = __INVALID_INDEX;
   }
 
   return std::make_tuple(index, exists);
@@ -420,7 +466,7 @@ unordered_map<Key, T, Hash, KeyEqual>::insert(const std::pair<Key, T> &value) {
   bool exists;
   std::tie(index, exists) = this->key_to_index(value.first);
 
-  if (index == __invalid_index) {
+  if (index == __INVALID_INDEX) {
     this->rehash(this->_2x_stored());
     std::tie(index, exists) = this->key_to_index(value.first);
   }
@@ -434,8 +480,7 @@ unordered_map<Key, T, Hash, KeyEqual>::insert(const std::pair<Key, T> &value) {
     }
   }
 
-  return std::make_pair(
-      iterator(_data.begin() += index, _data.begin(), _data.end()), !exists);
+  return std::make_pair(__iterator_from_index<iterator>(index), !exists);
 }
 
 template <class Key, class T, class Hash, class KeyEqual>
@@ -447,7 +492,7 @@ unordered_map<Key, T, Hash, KeyEqual>::find(const Key &key) {
   if (!exists) {
     return this->end();
   } else {
-    return iterator(_data.begin() += index, _data.begin(), _data.end());
+    return __iterator_from_index<iterator>(index);
   }
 }
 
@@ -462,7 +507,7 @@ unordered_map<Key, T, Hash, KeyEqual>::find(const K &x) {
   if (!exists) {
     return this->end();
   } else {
-    return iterator(_data.begin() += index, _data.begin(), _data.end());
+    return __iterator_from_index<iterator>(index);
   }
 }
 
@@ -475,7 +520,7 @@ unordered_map<Key, T, Hash, KeyEqual>::find(const Key &key) const {
   if (!exists) {
     return this->end();
   } else {
-    return iterator(_data.begin() += index, _data.begin(), _data.end());
+    return __iterator_from_index<const_iterator>(index);
   }
 }
 
@@ -490,7 +535,7 @@ unordered_map<Key, T, Hash, KeyEqual>::find(const K &x) const {
   if (!exists) {
     return this->end();
   } else {
-    return iterator(_data.begin() += index, _data.begin(), _data.end());
+    return __iterator_from_index<const_iterator>(index);
   }
 }
 

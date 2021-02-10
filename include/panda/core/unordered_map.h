@@ -1,16 +1,17 @@
 #pragma once
 
-#include "panda/core/mpl.h"
+#include "panda/core/mpl.h" // panda::mpl::is_empty_object 
 
-#include <cmath>   // std::ceil
+#include <cmath>   // std::ceil std::max
 #include <cstddef> // std::size_t std::ptrdiff_t
 
 #include <functional>       // std::hash std::equal_to
 #include <initializer_list> // std::initalizer_list
 #include <utility>          // std::pair
 #include <vector>           // std::vector
+#include <iterator>         // std::bidirectional_iterator_tag std::reverse_iterator std::make_reverse_iterator
 
-#include <boost/mpl/if.hpp>
+#include <boost/mpl/if.hpp> // boost::mpl::if_
 
 namespace panda {
 
@@ -22,12 +23,12 @@ template <class Key, class T, class Hash = std::hash<Key>,
           class KeyEqual = std::equal_to<Key>
           /*, class Allocator = std::allocator<std::pair<cosnt Key,T>>*/>
 class unordered_map {
-  static constexpr float __default_max_load_factor = 0.7;
-  static constexpr std::size_t __invalid_index = ~static_cast<std::size_t>(0);
-  static constexpr std::size_t __one = static_cast<std::size_t>(1);
+  static constexpr float __DEFAULT_MAX_LOAD_FACTOR = 0.7f;
+  static constexpr std::size_t __INVALID_INDEX = ~static_cast<std::size_t>(0);
+  static constexpr std::size_t __ONE = static_cast<std::size_t>(1);
 
   class node;
-  template <class Iterator, class ContainerIterator> class iterator_common_impl;
+  template <class Iterator> class iterator_common_impl;
   class const_iterator_impl;
   class iterator_impl;
 
@@ -53,8 +54,8 @@ public:
       *; /* typename std::allocator_traits<Allocator>::cosnt_pointer */
   using iterator = iterator_impl;
   using const_iterator = const_iterator_impl;
-  using local_iterator = iterator_impl;
-  using const_local_iterator = const_iterator_impl;
+  using reverse_iterator = std::reverse_iterator<iterator>;
+  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
   using node_type = node;
   // using allocator_type = Allocator;
 
@@ -110,6 +111,23 @@ public:
   const_iterator cend() const;
   const_iterator begin() const;
   const_iterator end() const;
+
+  reverse_iterator rbegin() {
+    return std::make_reverse_iterator(this->end());
+  }
+  reverse_iterator rend() { return std::make_reverse_iterator(this->begin()); }
+  const_reverse_iterator crbegin() const {
+    return std::make_reverse_iterator(this->cend());
+  }
+  const_reverse_iterator crend() const {
+    return std::make_reverse_iterator(this->cbegin());
+  }
+  const_reverse_iterator rbegin() const {
+    return std::make_reverse_iterator(this->end());
+  }
+  const_reverse_iterator rend() const {
+    return std::make_reverse_iterator(this->begin());
+  }
 
   // Capacity
   bool empty() const { return _impl->_stored == 0; }
@@ -232,6 +250,24 @@ private:
                                             this->max_load_factor()));
   }
 
+  size_type __first_used_index() const;
+  size_type __last_used_index() const;
+
+  template <class Iterator>
+  Iterator __iterator_from_index(size_type index) const {
+    if (index == __INVALID_INDEX)
+      index = _data.size();
+    return Iterator(_data.data() + index, _data.data(),
+                    _data.data() + __last_used_index() + 1);
+  }
+
+  template <class Iterator> Iterator __iterator_from_index(size_type index) {
+    if (index == __INVALID_INDEX)
+      index = _data.size();
+    return Iterator(_data.data() + index, _data.data(),
+                    _data.data() + __last_used_index() + 1);
+  }
+
   struct impl {
     float _max_load_factor; // limit to (_stored) / _data.size()
     size_type _stored;
@@ -240,7 +276,7 @@ private:
   using impl_pointer = impl *;
   static impl_pointer __alloc_impl() {
     auto tmp = new impl;
-    tmp->_max_load_factor = __default_max_load_factor;
+    tmp->_max_load_factor = __DEFAULT_MAX_LOAD_FACTOR;
     tmp->_stored = 0;
     tmp->_deleted = 0;
     return tmp;
