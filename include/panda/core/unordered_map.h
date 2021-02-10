@@ -2,17 +2,15 @@
 
 #include "panda/core/mpl.h"
 
+#include <cmath>   // std::ceil
 #include <cstddef> // std::size_t std::ptrdiff_t
 
-#include <functional> // std::hash std::equal_to
-#include <utility>    // std::pair
-#include <vector>     // std::vector
+#include <functional>       // std::hash std::equal_to
+#include <initializer_list> // std::initalizer_list
+#include <utility>          // std::pair
+#include <vector>           // std::vector
 
 #include <boost/mpl/if.hpp>
-
-/**
- * PANDA_UNORDERED_MAP_ALLOW_MAX_LOAD_ONE - allows the max load factor to be set to one (not recommended)
- */
 
 namespace panda {
 
@@ -21,14 +19,20 @@ namespace panda {
  */
 // TODO (rk) make allocator aware
 template <class Key, class T, class Hash = std::hash<Key>,
-          class KeyEqual = std::equal_to<Key>>
+          class KeyEqual = std::equal_to<Key>
+          /*, class Allocator = std::allocator<std::pair<cosnt Key,T>>*/>
 class unordered_map {
   static constexpr float __default_max_load_factor = 0.7;
+  static constexpr std::size_t __invalid_index = ~static_cast<std::size_t>(0);
+  static constexpr std::size_t __one = static_cast<std::size_t>(1);
 
   class node;
-  class iterator_common_impl;
+  template <class Iterator, class ContainerIterator> class iterator_common_impl;
   class const_iterator_impl;
   class iterator_impl;
+
+  using container =
+      std::vector<node /*, typename Allocator::rebind<node>::other */>;
 
 public:
   using key_type = Key;
@@ -36,43 +40,68 @@ public:
   using value_type = std::pair<const Key, T>;
   using size_type = std::size_t;
   using difference_type = std::ptrdiff_t;
-  using hasher = typename boost::mpl::_if<::panda::mpl::is_empty_object<Hash>,Hash,Hash&>::type;
-  using key_equal = typename boost::mpl::_if<::panda::mpl::is_empty_object<KeyEqual>,KeyEqual,KeyEqual&>::type;
+  using hasher = typename boost::mpl::if_<::panda::mpl::is_empty_object<Hash>,
+                                          Hash, Hash &>::type;
+  using key_equal =
+      typename boost::mpl::if_<::panda::mpl::is_empty_object<KeyEqual>,
+                               KeyEqual, KeyEqual &>::type;
   using reference = value_type &;
   using const_reference = const value_type &;
-  using pointer = value_type *;
-  using const_pointer = value_type const *;
+  using pointer =
+      value_type *; /* typename std::allocator_traits<Allocator>::pointer */
+  using const_pointer = value_type const
+      *; /* typename std::allocator_traits<Allocator>::cosnt_pointer */
   using iterator = iterator_impl;
   using const_iterator = const_iterator_impl;
   using local_iterator = iterator_impl;
   using const_local_iterator = const_iterator_impl;
   using node_type = node;
+  // using allocator_type = Allocator;
 
   unordered_map();
- 
-  unordered_map(size_type count);
- 
-  unordered_map(size_type count, const Hash &hash);
- 
-  unordered_map(size_type count, const Hash &hash, const KeyEqual &equal);
+  ~unordered_map();
 
-  template <class InputIt> unordered_map(InputIt first, InputIt last);
+  // unordered_map(const Allocator &alloc));
 
-  template <class InputIt>
-  unordered_map(InputIt first, InputIt last, size_type count);
+  unordered_map(size_type count /*, const Allocator& alloc = Allocator()*/);
 
-  template <class InputIt>
-  unordered_map(InputIt first, InputIt last, size_type count, const Hash &hash);
+  unordered_map(size_type count,
+                const Hash &hash /*, const Allocator& alloc = Allocator()*/);
+
+  unordered_map(
+      size_type count, const Hash &hash,
+      const KeyEqual &equal /*, const Allocator& alloc = Allocator()*/);
 
   template <class InputIt>
-  unordered_map(InputIt first, InputIt last, size_type count, const Hash &hash,
-                const KeyEqual &equal);
+  unordered_map(InputIt first,
+                InputIt last /*, const Allocator& alloc = Allocator()*/);
 
-  unordered_map(const unorded_map &) = default;
-  // unordered_map(unorded_map&&) = default;
+  template <class InputIt>
+  unordered_map(InputIt first, InputIt last,
+                size_type count /*, const Allocator& alloc = Allocator()*/);
 
-  unordered_map &operator=(const unordered_map &) = default;
-  // unordered_map& operator=(unordered_map&&) = default;
+  template <class InputIt>
+  unordered_map(InputIt first, InputIt last, size_type count,
+                const Hash &hash /*, const Allocator& alloc = Allocator()*/);
+
+  template <class InputIt>
+  unordered_map(
+      InputIt first, InputIt last, size_type count, const Hash &hash,
+      const KeyEqual &equal /*, const Allocator& alloc = Allocator()*/);
+
+  unordered_map(std::initializer_list<
+                value_type> /*, const Allocator& alloc = Allocator()*/);
+  unordered_map(std::initializer_list<value_type>,
+                size_type /*, const Allocator& alloc = Allocator()*/);
+  unordered_map(std::initializer_list<value_type>, size_type,
+                const Hash & /*, const Allocator& alloc = Allocator()*/);
+  unordered_map(std::initializer_list<value_type>, size_type, const Hash &,
+                const KeyEqual & /*, const Allocator& alloc = Allocator()*/);
+
+  unordered_map(const unordered_map &);
+  unordered_map(unordered_map &&);
+
+  unordered_map &operator=(unordered_map);
 
   // Iterators
   iterator begin();
@@ -83,11 +112,11 @@ public:
   const_iterator end() const;
 
   // Capacity
-  bool empty() const { return m_stored == 0; }
-  size_type size() const { return m_stored; }
+  bool empty() const { return _impl->_stored == 0; }
+  size_type size() const { return _impl->_stored - _impl->_deleted; }
   size_type max_size() const {
-    return static_cast<size_type>(std::numberic_limits<size_type>::max() *
-                                  _max_load_factor);
+    return static_cast<size_type>(std::numeric_limits<size_type>::max() *
+                                  _impl->_max_load_factor);
   }
 
   // Modifiers
@@ -106,7 +135,12 @@ public:
   template <class... Args>
   std::pair<iterator, bool> try_emplace(Key key, Args... value);
 
-  void swap(unordered_map &other);
+  friend void swap(unordered_map &a, unordered_map &b) {
+    std::swap(a._impl, b._impl);
+    std::swap(a._data, b._data);
+  }
+
+  void swap(unordered_map &other) { swap(*this, other); }
 
   // TODO: (rk) c++17 methods
   // node_type extract(iterator);
@@ -117,7 +151,7 @@ public:
   iterator find(const Key &key);
   template <class K> iterator find(const K &x);
 
-  cosnt_iterator find(const Key &key) const;
+  const_iterator find(const Key &key) const;
   template <class K> const_iterator find(const K &x) const;
 
   T &at(const Key &key) {
@@ -138,36 +172,84 @@ public:
 
   bool contains(const Key &key) { return this->find(key) != this->end(); }
   template <class K> bool contains(const K &x) {
-    return this->find(key) != this->end();
+    return this->find(x) != this->end();
   }
 
   size_type count(const Key &key) const { return this->contains(key) ? 1 : 0; }
   template <class K> size_type count(const K &x) const {
-    return this->contains(key) ? 1 : 0;
+    return this->contains(x) ? 1 : 0;
   }
 
   // Hash Policy
   float load_factor() const {
-    return static_cast<float>(_stored) / static_cast<float>(_data.size());
+    return static_cast<float>(_impl->_stored) /
+           static_cast<float>(_data.size());
   }
-  float max_load_factor() const { return _max_load_factor; }
-  void max_load_factor(float factor) { _max_load_factor = factor; }
+  float load_factor_deleted() const {
+    return static_cast<float>(_impl->_deleted) /
+           static_cast<float>(_impl->_stored);
+  }
+  float load_factor_chain() const {
+    return static_cast<float>(this->max_chain()) /
+           static_cast<float>(_impl->_stored);
+  }
+  float max_load_factor() const { return _impl->_max_load_factor; }
+  void max_load_factor(float factor) { _impl->_max_load_factor = factor; }
+
+  size_type max_chain() const;
+  size_type mean_chain() const;
 
   void rehash(size_type count);
-  void reserve(size_type count);
+  void compress() {
+    this->rehash(std::ceil((_impl->_stored - _impl->_deleted) /
+                           this->max_load_factor()));
+  }
+  void reserve(size_type count) {
+    this->rehash(std::ceil(count / this->max_load_factor()));
+  }
 
   // Observers
   hasher hash_function() { return _hash; }
   key_equal key_eq() { return _key_equal; }
 
 private:
+  /**
+   */
+  using key_to_index_t = std::tuple<size_type, bool>;
+  template <class K, class Equal>
+  key_to_index_t key_to_index(const K &key, Equal &&is_equal) const;
+  key_to_index_t key_to_index(const Key &key) const {
+    return this->key_to_index(key, _key_equal);
+  }
+  template <class K, class Equal>
+  key_to_index_t key_to_index(const K &key, Equal &&is_equal);
+  key_to_index_t key_to_index(const Key &key) {
+    return this->key_to_index(key, _key_equal);
+  }
 
-  std::pair<size_type,bool> hash_to_index(size_type hashed_key);
+  size_type _2x_stored() {
+    return static_cast<size_type>(std::ceil((_impl->_stored - _impl->_deleted) /
+                                            this->max_load_factor()));
+  }
 
-  float _max_load_factor; // limit to (_stored + _deleted) / _data.size()
-  std::vector<node<T>> _data;
-  size_type _stored;
-  size_type _deleted;
+  struct impl {
+    float _max_load_factor; // limit to (_stored) / _data.size()
+    size_type _stored;
+    size_type _deleted;
+  };
+  using impl_pointer = impl *;
+  static impl_pointer __alloc_impl() {
+    auto tmp = new impl;
+    tmp->_max_load_factor = __default_max_load_factor;
+    tmp->_stored = 0;
+    tmp->_deleted = 0;
+    return tmp;
+  }
+  static void __dealloc_impl(impl_pointer pimpl) { delete pimpl; }
+
+  impl_pointer _impl; // This is a pointer because allocators...
+
+  container _data;
   Hash _hash;
   KeyEqual _key_equal;
 };
