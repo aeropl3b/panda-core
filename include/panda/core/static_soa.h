@@ -1,19 +1,34 @@
+/** Static SOA structure
+ * @file
+ */
+#pragma once
+
 #include <tuple>
 #include <utility>
 #include <functional>
 #include <vector>
 
-namespace xlib
+namespace panda
+{
+namespace core
 {
 namespace detail
 {
 } // namespace detail
 
-template < class... Types >
+template < class... Ts >
 class static_soa
 {
-   using Tuple = std::tuple<std::remove_cv_t<std::remove_reference_t<Types>>...>;
+   using Tuple = std::tuple<std::remove_cv_t<std::remove_reference_t<Ts>>...>;
 public:
+
+   template < class T >
+   struct default_initializer
+   {
+      void operator()(typename T::iterator, typename T::iterator)
+      {}
+   };
+
    struct handle;
    template < class T, size_t I >
    struct meta_handle;
@@ -26,13 +41,13 @@ public:
       using const_reference = const T&;
 
       meta_handle() = default;
-      meta_handle(static_soa<Types...>* parent): _parent(parent) {}
+      meta_handle(static_soa<Ts...>* parent): _parent(parent) {}
 
-      reference data() const noexcept { return _parent->get_data<I>(); }
+      reference data() const noexcept { return _parent->template get<I>(); }
 
-      static_soa<Types...>* parent() noexcept { return _parent; }
+      static_soa<Ts...>* parent() noexcept { return _parent; }
    private:
-      static_soa<Types...>* _parent;
+      static_soa<Ts...>* _parent;
    };
 
    struct handle
@@ -81,69 +96,86 @@ public:
     * @return data stored at index I in the static_soa container
     */
    template < size_t I >
-   reference<I> get_data() noexcept;
+   reference<I> get() noexcept;
 
    /** Get the data stored at index I in the static_soa container
     * @return data stored at index I in the static_soa container
     */
    template < class T, size_t I >
-   reference<I> get_data(const meta_handle<T,I>& mh) noexcept;
+   reference<I> get(const meta_handle<T,I>& mh) noexcept;
 
    /** Get the data stored at index I in the static_soa container
     * @return data stored at index I in the static_soa container
     */
    template < class T >
-   T& get_data(const handle& mh);
+   T& get(const handle& mh);
 
    /** Get the data stored at index I in the static_soa container
     * @return data stored at index I in the static_soa container
     */
    template < size_t I >
-   const_reference<I> get_data() const noexcept;
+   const_reference<I> get() const noexcept;
 
-   /** Apply a functor of type CallBack to the data in the static soa container
-    * @tparam CallBack functor type
-    * @tparam CallBack Extra arguments to use when applying CallBack to data
-    * @param args List of arguments to forward to the invokation of CallBack
+   /** Call a visitor functor of type Visitor to each type stored in static_soa container
+    * @tparam Visitor functor type with operator()(Type, Args...) where Type is a type in the static_soa type list Ts...
+    * @tparam Args... Extra arguments to use when applying Function to data
+    * @param args List of arguments to forward to the invokation of Function
     */
-   template < template<class> class CallBack, class... Args >
-   void apply(Args&&... args);
+   template < class Visitor, class... Args >
+   void visit(Args&&...args);
 
-   /** Apply a functor of type CallBack to the data in the static soa container
-    * @tparam CallBack functor type
+   template < std::size_t I, class Function, class... Args >
+   void register_initializer(std::size_t priority, Function&& initializer)
+   {
+      this->_initializer.insert({priority, [&](std::size_t offset)
+      {
+         initializer(std::get<I>(this->_data).begin() + offset, std::get<I>(this->_data).end());
+      }});
+   }
+
+   /** Apply a functor of type Function to the data in the static soa container
+    * @tparam Function functor type
     * @tparam Indices index_sequence of elements to pass to the callback
-    * @tparam Args... Extra arguments to use when applying CallBack to data
-    * @param args List of arguments to forward to the invokation of CallBack
+    * @tparam Args... Extra arguments to use when applying Function to data
+    * @param args List of arguments to forward to the invokation of Function
     */
-   template < template<class> class CallBack, class Indices, class... Args >
+   template < template<class> class Function, class Indices, class... Args >
    void apply_to_indices(Indices&& indices, Args&&... args);
 
-   /** Apply a function that takes the Types::reference..., Args... as inputs
-    * @tparam CallBack Type of the callback function
+   /** Apply a function that takes the Ts::reference..., Args... as inputs
+    * @tparam Function Type of the callback function
     * @tparam Args List of extra argument types
     * @param f Callback function
     * @param args list of extra arguments to pass to f
     * @return Result of f
     */
-   template < class CallBack, class... Args >
+   template < class Function, class... Args >
    decltype(auto)
-   apply_to_element(size_t i, CallBack&& f, Args&&... args);
+   apply_to_element(size_t i, Function&& f, Args&&... args);
 
-   /** Apply a function that takes the Types::reference..., Args... as inputs
-    * @tparam CallBack Type of the callback function
+   /** Apply a function that takes the Ts::reference..., Args... as inputs
+    * @tparam Function Type of the callback function
     * @tparam Args List of extra argument types
     * @param f Callback function
     * @param args list of extra arguments to pass to f
     * @return std::vector or the results of f called per element
     */
-   template < class CallBack, class... Args >
-   void apply_per_element(CallBack&& f, Args&&... args);
+   template < class Function, class... Args >
+   void apply_per_element(Function&& f, Args&&... args);
 
    /** Get the element i from all of the arrays in the static soa container
     * @param i index in the arrays to get elements from
     * @return std::tuple with the reference values of all of the array elements
     */
-   decltype(auto) get_element(size_t i);
+   std::tuple<typename Ts::value_type...> get_element(size_t i);
+
+#if 0
+   /** Set the element i from all of the arrays in the static soa container
+    * @param i index in the arrays to get elements from
+    * @param values std::tuple containing an element value for each array
+    */
+   void set_element(size_t i, std::tuple<Type::value_type...>);
+#endif
 
    /** Resize all of the data in the static_soa container
     * @param n new size
@@ -159,72 +191,33 @@ public:
     * @param new_index_map new indices of each element
     */
    template < class T, class = std::enable_if_t<std::is_integral<T>::value> >
-   void reorder(const std::vector<T>& new_index_map);
+   void remap(const std::vector<T>& new_index_map);
 
 private:
+   struct resizer
+   {
+      template < class T >
+      void operator()(T& data, std::size_t n)
+      {
+         data.resize(n);
+      }
+   };
+
+   struct remapper
+   {
+      template < class T >
+      void operator()(T& data, const std::vector<T>& new_index_map)
+      {
+      }
+   };
+
    Tuple _data;
+   std::map<std::size_t,std::function<void(std::size_t n)>> _initializer;
 };
-} // namespace xlib
+} // namespace core
+} // namespace panda
 
 #include "detail/static_soa.hpp"
-
-/*
-struct ParcelDataStorage
-{
-   xlib::static_soa<std::vector<xlib::vec<double,3>>>
-};
-
-#define CREATE_PARCEL_STORAGE(TYPE, PDATA, MDATA)\
-struct TYPE##Parcel\
-{\
-   using type = std::tuble<UNROLL_TYPES(__VA_ARGS__)>\
-   enum TYPE##Ids\
-   {\
-      cell_index_id,
-      position_id,
-      velocity_id,
-      UNROLL_NAMES_ENUM(__VA_ARGS__),\
-      NUM_##TYPE##_VARS\
-   };\
-   std::vector<int64_t>& cell_index() { return _data->get_data<cell_index_id>(); }
-   std::vector<int64_t>& cell_index() { return _data->get_data<position_id>(); }
-   std::vector<int64_t>& cell_index() { return _data->get_data<velocity_id>(); }
-   UNROLL_NAME_GETTERS(__VA_ARGS__)\
-private:\
-   xlib::static_soa<
-      std::vector<int64_t>,
-      std::vector<xlib::vec<double,3>
-      std::vector<xlib::vec<double,3>
-      UNROLL_TYPES(__VA_ARGS__)>* _data;\
-};
-
-// Create a parcel data type
-CREATE_PARCEL_STORAGE(Liquid,
-   PARCEL_DATA(
-      (std::vector<xlib::vec<double,3>>, position),
-      (std::vector<xlib::vec<double,3>>, velocity)
-      (std::vector<double>, radius),
-      (xlib::nd_array<double,2>, species_mf)
-   ),
-   MEMBER_DATA(
-      (double, asdf, 1.0 /* Default value//)
-   )
-);
-
-
-int main()
-{
-   Mesh* mesh = new Mesh;
-
-   // Register parcel data type
-   mesh->addParcelData<LiquidParcelData>("liquid_spray_1");
-   auto& pdata = mesh->getParcelData<LiquidParcelData>("liquid_spray_1");
-   pdata.position(i); // zero overhead, compile time getter
-   pdata.position(i)[j];
-   pdata.species_mf(i)[j];
-   pdata.member<int>("num_species") = num_parcel_species;
-   pdata.member<struct species_defintion**>("species") = new struct species_defintion*[num_parcel_species];
-
-}
-*/
+#include "detail/stl_static_soa.hpp"
+#include "detail/static_soa_macros.hpp"
 
